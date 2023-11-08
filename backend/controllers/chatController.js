@@ -1,6 +1,7 @@
 const asyncHandler = require("express-async-handler");
 const Chat = require("../Models/ChatModel");
 const User = require("../Models/UserModel");
+
 const accessChat = asyncHandler(async (req, res) => {
   const { userId } = req.body;
 
@@ -36,7 +37,7 @@ const accessChat = asyncHandler(async (req, res) => {
 
     const fullChat = await Chat.findOne({ _id: createdChat._id }).populate(
       "users",
-      "-password"
+      "-password" 
     );
     console.log(fullChat);
     res.send(fullChat).sendStatus(200);
@@ -170,4 +171,11 @@ const removeFromGroup = asyncHandler(async (req, res) => {
   }
 });
 
-module.exports = { accessChat, fetchChat, createGroup, renameGroup, addToGroup,removeFromGroup };
+module.exports = {
+  accessChat,
+  fetchChat,
+  createGroup,
+  renameGroup,
+  addToGroup,
+  removeFromGroup,
+};
