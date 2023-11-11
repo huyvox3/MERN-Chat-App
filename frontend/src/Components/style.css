@@ -1,6 +1,19 @@
-.message{
-    display: flex;
-    flex-direction: column;
-    overflow-y: scroll;
-    scrollbar-width: none;
+.message {
+  display: flex;
+  flex-direction: column;
+  scrollbar-width: 1px;
+  overflow: scroll;
+}
+.notification-badge {
+  font-size: 12px;
+  color: white;
+  position: relative;
+  display: flex;
+  float: right;
+  right: 14px;
+  background-color: red;
+  border-radius: 50%;
+  width: 12px;
+  height: 18px;
+  justify-content: center;
 }

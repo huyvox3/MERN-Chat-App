@@ -24,9 +24,10 @@ import axios from "axios";
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChatState } from "../../Context/ChatProvider";
-import ProfileModal from "./ProfileModal";
 import ChatLoading from "../ChatLoading";
+import { getSender } from "../config/ChatLogic";
 import UserListItem from "../userAvatar/UserListItem";
+import ProfileModal from "./ProfileModal";
 const SideDrawer = () => {
   const [search, setSearch] = useState("");
   const [searchResult, setSearchResult] = useState([]);
@@ -44,6 +45,18 @@ const SideDrawer = () => {
     chats,
     setChats,
   } = ChatState();
+
+  const Effect = {
+    SCALE: "scale",
+  };
+
+  class NotificationBadge extends React.Component {
+    render() {
+      const { count, effect } = this.props;
+
+      return <div className={`notification-badge ${effect}`}>{count}</div>;
+    }
+  }
 
   const logoutHandler = () => {
     localStorage.removeItem("userInfo");
@@ -75,7 +88,6 @@ const SideDrawer = () => {
 
       setLoading(false);
       setSearchResult(data);
-      console.log(data);
     } catch (error) {
       toast({
         title: "Error Occured!",
@@ -89,8 +101,6 @@ const SideDrawer = () => {
   };
 
   const accessChat = async (userId) => {
-    console.log(userId);
-
     try {
       setLoadingChat(true);
       const config = {
@@ -99,7 +109,7 @@ const SideDrawer = () => {
           Authorization: `Bearer ${user.token}`,
         },
       };
-      const { data } = await axios.post(`/chats`, { userId }, config);
+      const { data } = await axios.post(`/chats/`, { userId }, config);
 
       if (!chats.find((c) => c._id === data._id)) setChats([data, ...chats]);
       setSelectedChat(data);
@@ -142,9 +152,35 @@ const SideDrawer = () => {
         <div>
           <Menu>
             <MenuButton p={1}>
-              <BellIcon></BellIcon>
+              {notification.length ? (
+                <NotificationBadge
+                  count={notification.length}
+                  effect={Effect.SCALE}
+                ></NotificationBadge>
+              ) : (
+                <></>
+              )}
+              <BellIcon fontSize="2xl" m={1}></BellIcon>
             </MenuButton>
-            <MenuList></MenuList>
+            <MenuList pl={2}>
+              {!notification.length && "No new messages"}
+              {/* {notification.length && 
+              
+              } */}
+              {notification.map((noti) => (
+                <MenuItem
+                  key={noti._id}
+                  onClick={() => {
+                    setSelectedChat(noti.chat);
+                    setNotification(notification.filter((n) => n !== noti));
+                  }}
+                >
+                  {noti.chat.isGroupChat
+                    ? `New messages in ${noti.chat.chatName}`
+                    : `New messages from ${getSender(user, noti.chat.users)}`}
+                </MenuItem>
+              ))}
+            </MenuList>
           </Menu>
           <Menu>
             <MenuButton as={Button} bg="white" rightIcon={<ChevronDownIcon />}>
@@ -190,7 +226,6 @@ const SideDrawer = () => {
                   handleFunction={() => accessChat(user._id)}
                 />
               ))
-              
             )}
             {loadingChat && <Spinner ml="auto" display="flex" />}
           </DrawerBody>

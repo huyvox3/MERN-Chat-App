@@ -6,15 +6,20 @@ import { ChatState } from "../Context/ChatProvider";
 import ChatLoading from "./ChatLoading";
 import { getSender } from "./config/ChatLogic";
 import GroupChatModal from "./miscellaneous/GroupChatModal";
-const MyChats = ({ fetchAgain }) => {
+const MyChats = ({ fetchAgain, setFetchAgain }) => {
   const [loggedUser, setLoggedUser] = useState();
 
-  const { selectedChat, setSelectedChat, user, chats, setChats } = ChatState();
+  const {
+    selectedChat,
+    setSelectedChat,
+    user,
+    chats,
+    setChats,
+  } = ChatState();
 
   const toast = useToast();
 
   const fetchChats = async () => {
-    // console.log(user._id);
     try {
       const config = {
         headers: {
@@ -23,12 +28,10 @@ const MyChats = ({ fetchAgain }) => {
       };
 
       const { data } = await axios.get("/chats/", config);
-      console.log(data)
-      if ({data}) {
-        await setChats(data)
+      if ({ data }) {
+        await setChats(data);
       }
     } catch (error) {
-      console.log(error);
       toast({
         title: "Error Occured!",
         description: "Failed to Load the chats",
@@ -43,9 +46,10 @@ const MyChats = ({ fetchAgain }) => {
   useEffect(() => {
     setLoggedUser(JSON.parse(localStorage.getItem("userInfo")));
     fetchChats();
+    
 
     // eslint-disable-next-line
-  }, [fetchAgain]);
+  }, [fetchAgain,chats]);
 
   return (
     <Box
@@ -91,32 +95,43 @@ const MyChats = ({ fetchAgain }) => {
       >
         {chats ? (
           <Stack overflowY="scroll">
-            {chats.map((chat) => (
-              <Box
-                onClick={() => setSelectedChat(chat)}
-                cursor="pointer"
-                bg={selectedChat === chat ? "#38B2AC" : "#E8E8E8"}
-                color={selectedChat === chat ? "white" : "black"}
-                px={3}
-                py={2}
-                borderRadius="lg"
-                key={chat._id}
-              >
-                <Text>
-                  {!chat.isGroupChat
-                    ? getSender(loggedUser, chat.users)
-                    : chat.chatName}
-                </Text>
-                {chat.latestMessage && (
-                  <Text fontSize="xs">
-                    <b>{chat.latestMessage.sender.name} : </b>
-                    {chat.latestMessage.content.length > 50
-                      ? chat.latestMessage.content.substring(0, 51) + "..."
-                      : chat.latestMessage.content}
+            {chats.map((chat) => {
+
+              return (
+                
+                <Box
+                  onClick={() => setSelectedChat(chat)}
+                  cursor="pointer"
+                  bg={selectedChat === chat ? "#38B2AC" : "#E8E8E8"}
+                  color={selectedChat === chat ? "white" : "black"}
+                  px={3}
+                  fontSize={"20px"}
+                  py={2}
+                  borderRadius="lg"
+                  key={chat._id}
+                >
+                  <Text>
+                    {!chat.isGroupChat
+                      ? getSender(loggedUser, chat.users)
+                      : chat.chatName}
                   </Text>
-                )}
-              </Box>
-            ))}
+  
+                  {chat.latestMessage && (
+                    <Text fontSize="xs">
+                      {chat.latestMessage.sender._id !== user._id ? (
+                        <b>{chat.latestMessage.sender.name}: </b>
+                      ) : (
+                        <b>You: </b>
+                      )}
+                      {chat.latestMessage.content.length > 50
+                        ? chat.latestMessage.content.substring(0, 51) + "..."
+                        : chat.latestMessage.content}
+                    </Text>
+                  )}
+                </Box>
+              )
+            }
+            )}
           </Stack>
         ) : (
           <ChatLoading />
