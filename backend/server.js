@@ -50,6 +50,11 @@ io.on("connection", (socket) => {
     socket.join(room);
     console.log("User joined Room: " + room);
   });
+
+  socket.on("leave chat", (room) => {
+    socket.leave(room);
+    console.log("User left Room: " + room);
+  });
   socket.on("new message", (newMessageReceived) => {
     var chat = newMessageReceived.chat;
     if (!chat.users) return console.log("chat.users  not defined");
@@ -60,18 +65,16 @@ io.on("connection", (socket) => {
   });
 
   socket.on("fetch my chat", async (room) => {
-    // if (!room.users) return console.log("room.users not defined");
-    // socket.in(room).emit("my chat update", room);
-    // room.users.forEach((user) => {
-    //   console.log(user._id);
-    // });
-
     const chat = await Chat.findById(room);
     if (!chat.users) return console.log("users not defined");
     socket.in(chat).emit("my chat update", chat);
   });
 
-  socket.on("typing", (room) => socket.to(room).emit("typing"));
+  socket.on("typing", (room) => {
+    {
+      socket.to(room).emit("typing", room);
+    }
+  });
   socket.on("stop typing", (room) => socket.to(room).emit("stop typing"));
 });
 

@@ -62,9 +62,7 @@ const Signup = () => {
     data.append("cloud_name", "dtpnu1cmk");
     
     const imageURL = await fetchImage(data);
-    console.log("imageURL: " + imageURL);
     setPic( imageURL);
-    console.log("after fetch");
     return;
   };
   const submitHandler = async () => {
@@ -176,7 +174,6 @@ const Signup = () => {
           onChange={(e) => {
             postDetails(e.target.files[0]);
 
-            console.log(typeof e.target.files[0]);
           }}
         ></Input>
       </FormControl>

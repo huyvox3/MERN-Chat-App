@@ -16,8 +16,8 @@ const getAllMessages = asyncHandler(async (req, res) => {
 });
 
 const sendMessage = asyncHandler(async (req, res) => {
-  const { content, chatId } = req.body;
-  if (!content || !chatId) {
+  const { content, chatId ,type,fileName} = req.body;
+  if (!content || !chatId || !type ||!fileName) {
     console.log("Invalied passed data ");
     return res.sendStatus(400);
   }
@@ -27,6 +27,8 @@ const sendMessage = asyncHandler(async (req, res) => {
     sender: req.user._id,
     content: content,
     chat: chatId,
+    type: type,
+    fileName: fileName,
   };
   try {
     var message = await Message.create(newMessage);

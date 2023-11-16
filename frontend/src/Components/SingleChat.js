@@ -1,6 +1,11 @@
-import { ArrowBackIcon } from "@chakra-ui/icons";
+import {
+  ArrowBackIcon,
+  ArrowDownIcon,
+  ChevronRightIcon,
+} from "@chakra-ui/icons";
 import {
   Box,
+  Button,
   FormControl,
   IconButton,
   Input,
@@ -24,10 +29,13 @@ const ENDPOINT = "http://localhost:5000";
 var socket, selectedChatCompare;
 
 const SingleChat = ({ fetchAgain, setFetchAgain }) => {
+  const [file, setFile] = useState("");
+  const [fileLink, setFileLink] = useState("");
+  const [fileType, setFileType] = useState("");
+  const [isUpload, setIsUpload] = useState(false);
   const [messages, setMessage] = useState([]);
   const [loading, setLoading] = useState(false);
   const [newMessage, setNewMessage] = useState();
-  const [newMyChats,setNewMyChats] = useState()
   const [socketConnected, setSocketConnected] = useState(false);
   const [typing, setTyping] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
@@ -39,8 +47,6 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
     setNotification,
     Chats,
     setChats,
-    oldChats,
-    setOldChats,
   } = ChatState();
 
   const toast = useToast();
@@ -56,13 +62,25 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
     socket = io(ENDPOINT);
     socket.emit("setup", user);
     socket.on("connected", () => setSocketConnected(true));
-    socket.on("typing", () => setIsTyping(true));
-    socket.on("stop typing", () => setIsTyping(false));
+    socket.on("typing", (room) => {
+      // if (selectedChatCompare._id === room)
+      setIsTyping(true);
+    });
+    socket.on("stop typing", () => {
+      setIsTyping(false);
+    });
   }, [user]);
 
   useEffect(() => {
     fetchMessages();
+    if (!selectedChat && selectedChatCompare) {
+      console.log("okasdasd");
+      socket.emit("leave chat", selectedChatCompare._id);
+    }
     selectedChatCompare = selectedChat;
+
+    // if(selectedChat)
+    // console.log(selectedChat._id);
   }, [selectedChat]);
 
   useEffect(() => {
@@ -81,24 +99,31 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
     });
 
     socket.on("my chat update", async (room) => {
-      console.log("my chat update ");
-     setChats([Chats, ...room]);
+      setChats([Chats, ...room]);
       setFetchAgain(!fetchAgain);
     });
   });
+  const handleClick = (id) => {
+    document.getElementById(id).click();
+  };
 
- const typingHandler = (e) => {
-    if (e.key === "Backspace") setTyping(false);
-    if (e.target.value === "") setTyping(false);
+  const typingHandler = (e) => {
+    if (e.key === "Backspace" || e.target.value === "") {
+      socket.emit("stop typing");
+      setTyping(false);
+      // setIsTyping(false);
+    }
+
     setNewMessage(e.target.value);
     if (!socketConnected) return;
     if (!typing) {
       setTyping(true);
       socket.emit("typing", selectedChat._id);
     }
+
     if (e.target.value !== "") {
       let lastTypingTime = new Date().getTime();
-      var timerLength = 3000;
+      var timerLength = 5000;
       setTimeout(() => {
         var timeNow = new Date().getTime();
         var timeDiff = timeNow - lastTypingTime;
@@ -124,6 +149,7 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
       const { data } = await axios.get(`/messages/${selectedChat._id}`, config);
 
       setMessage(data);
+
       setLoading(false);
       socket.emit("join chat", selectedChat._id);
     } catch (error) {
@@ -138,11 +164,132 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
     }
   };
 
+  const getConnectedDevices = async (type) => {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+
+    const videoCameras = devices.filter((device) => device.kind === type);
+    console.log("Cameras found:", videoCameras);
+  };
+
   const sendMessage = async (e) => {
-    if (e.key === "Enter" && newMessage) {
+    if (e.key === "Enter" && (newMessage || fileLink)) {
       socket.emit("stop typing", selectedChat._id);
       socket.emit("fetch my chat", selectedChat._id);
 
+      if (newMessage) {
+        try {
+          const config = {
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${user.token}`,
+            },
+          };
+          setNewMessage("");
+          setFileLink("");
+          const { data } = await axios.post(
+            "/messages",
+            {
+              content: newMessage,
+              type: "message",
+              chatId: selectedChat._id,
+              fileName: "message",
+            },
+            config
+          );
+
+          socket.emit("new message", data);
+          setMessage([...messages, data]);
+          console.log("message sent");
+        } catch (error) {
+          toast({
+            title: "Error Occured!",
+            description: "Failed to send the Message",
+            status: "error",
+            duration: 5000,
+            isClosable: true,
+            position: "bottom",
+          });
+        }
+      }
+
+      if (fileLink && fileType) {
+        try {
+          const config = {
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${user.token}`,
+            },
+          };
+          const { data } = await axios.post(
+            "/messages",
+            {
+              content: fileLink,
+              type: fileType,
+              chatId: selectedChat._id,
+              fileName: file,
+            },
+            config
+          );
+          setFileLink("");
+          setFileType("");
+
+          socket.emit("new message", data);
+          setMessage([...messages, data]);
+          setFile("");
+        } catch (error) {
+          toast({
+            title: "Error Occured!",
+            description: "Failed to send the Message",
+            status: "error",
+            duration: 5000,
+            isClosable: true,
+            position: "bottom",
+          });
+        }
+      }
+    }
+  };
+
+  const sendMessageButton = async () => {
+    if (newMessage || fileLink) {
+      socket.emit("stop typing", selectedChat._id);
+      socket.emit("fetch my chat", selectedChat._id);
+      if (newMessage) {
+        try {
+          const config = {
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${user.token}`,
+            },
+          };
+          setNewMessage("");
+          const { data } = await axios.post(
+            "/messages",
+            {
+              content: newMessage,
+              type: "message",
+              chatId: selectedChat._id,
+              fileName: "message",
+            },
+            config
+          );
+
+          socket.emit("new message", data);
+          setMessage([...messages, data]);
+        } catch (error) {
+          toast({
+            title: "Error Occured!",
+            description: "Failed to send the Message",
+            status: "error",
+            duration: 5000,
+            isClosable: true,
+            position: "bottom",
+          });
+        }
+      }
+    }
+
+    if (fileLink && fileType) {
       try {
         const config = {
           headers: {
@@ -150,18 +297,22 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
             Authorization: `Bearer ${user.token}`,
           },
         };
-        setNewMessage("");
         const { data } = await axios.post(
           "/messages",
           {
-            content: newMessage,
+            content: fileLink,
+            type: fileType,
             chatId: selectedChat._id,
+            fileName: file,
           },
           config
         );
+        setFileLink("");
+        setFileType("");
 
         socket.emit("new message", data);
         setMessage([...messages, data]);
+        setFile("");
       } catch (error) {
         toast({
           title: "Error Occured!",
@@ -173,6 +324,58 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
         });
       }
     }
+  };
+
+  const fetchFile = async (data, type) => {
+    var url = "https://api.cloudinary.com/v1_1/dtpnu1cmk/raw/upload";
+    setFileType("file");
+    if (type === "image") {
+      url = "https://api.cloudinary.com/v1_1/dtpnu1cmk/image/upload";
+      setFileType("image");
+    }
+
+    if (type === "video") {
+      url = "https://api.cloudinary.com/v1_1/dtpnu1cmk/video/upload";
+      setFileType("video");
+    }
+
+    const response = await fetch(url, {
+      method: "post",
+      body: data,
+    });
+    const json = await response.json();
+    console.log(json.url.toString());
+    setLoading(false);
+    return json.url.toString();
+  };
+  const postDetails = async (pics) => {
+    var type = "file";
+    console.log(pics.type);
+    if (pics === undefined) {
+      toast({
+        title: "Please select a file",
+        status: "warning",
+        duration: 500,
+        isClosable: true,
+        position: "bottom",
+      });
+      return;
+    }
+    if (pics.type === "image/jpeg") type = "image";
+    if (pics.type === "video/mp4") type = "video";
+    console.log(type);
+    const data = new FormData();
+    data.append("file", pics);
+    data.append("upload_preset", "chat-app");
+    data.append("cloud_name", "dtpnu1cmk");
+
+    setIsUpload(true);
+    const imageURL = await fetchFile(data, type);
+    setFile(pics.name);
+    setFileLink(imageURL);
+
+    setIsUpload(false);
+    return imageURL;
   };
   return (
     <>
@@ -195,6 +398,7 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
               icon={<ArrowBackIcon></ArrowBackIcon>}
               onClick={() => setSelectedChat("")}
             ></IconButton>
+
             {!selectedChat.isGroupChat ? (
               <>
                 {getSender(user, selectedChat.users)}
@@ -212,6 +416,15 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
                 ></UpdateGroupChatModal>
               </>
             )}
+            <IconButton
+              icon={<ArrowDownIcon></ArrowDownIcon>}
+              onClick={() => {
+                getConnectedDevices("videoinput");
+              }}
+              color={"black"}
+            >
+              asdfasdfas
+            </IconButton>
           </Text>
           <Box
             display="flex"
@@ -240,19 +453,27 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
                 <ScrollableChat messages={messages}></ScrollableChat>
               </div>
             )}
-            <FormControl onKeyDown={sendMessage} isRequired mt={3}>
-              {isTyping ? (
-                <div>
-                  <Lottie
-                    options={defaultOptions}
-                    // height={50}
-                    width={70}
-                    style={{ marginBottom: 15, marginLeft: 0 }}
-                  />
-                </div>
-              ) : (
-                <></>
-              )}
+            {isTyping ? (
+              <>
+                {}
+                <Lottie
+                  options={defaultOptions}
+                  // display="flex"
+                  height={"8em"}
+                  width={"fit-content"}
+                  style={{ marginLeft: 0 }}
+                />
+              </>
+            ) : (
+              <></>
+            )}
+            <FormControl
+              className="form-control"
+              display={"flex"}
+              onKeyDown={sendMessage}
+              isRequired
+              mt={3}
+            >
               <Input
                 variant="filled"
                 placeholder="Enter a message"
@@ -260,7 +481,56 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
                 bg={"#E0E0E0"}
                 value={newMessage}
               ></Input>
+
+              <IconButton
+                display={"flex"}
+                ml={2}
+                onClick={sendMessageButton}
+                color={"white"}
+                backgroundColor={"gray"}
+                icon={<ChevronRightIcon boxSize={"2em"}></ChevronRightIcon>}
+              ></IconButton>
+              <Button
+                colorScheme="blue"
+                ml={"3"}
+                onClick={() => {
+                  handleClick("upload");
+                }}
+              >
+                Upload
+              </Button>
+              <Input
+                type="file"
+                id="upload"
+                display={"none"}
+                onChange={(e) => {
+                  postDetails(e.target.files[0]);
+                }}
+              ></Input>
             </FormControl>
+            {isUpload ? (
+              <div>
+                <Spinner
+                  thickness="4px"
+                  speed="0.65s"
+                  emptyColor="gray.200"
+                  color="blue.500"
+                  size="md"
+                ></Spinner>
+              </div>
+            ) : (
+              <>
+                {file ? (
+                  <Box>
+                    <Text ml={"2"} float={"left"} display={"flex"}>
+                      {file}
+                    </Text>
+                  </Box>
+                ) : (
+                  <></>
+                )}
+              </>
+            )}
           </Box>
         </>
       ) : (

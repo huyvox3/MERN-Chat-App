@@ -9,13 +9,7 @@ import GroupChatModal from "./miscellaneous/GroupChatModal";
 const MyChats = ({ fetchAgain, setFetchAgain }) => {
   const [loggedUser, setLoggedUser] = useState();
 
-  const {
-    selectedChat,
-    setSelectedChat,
-    user,
-    chats,
-    setChats,
-  } = ChatState();
+  const { selectedChat, setSelectedChat, user, chats, setChats } = ChatState();
 
   const toast = useToast();
 
@@ -46,10 +40,9 @@ const MyChats = ({ fetchAgain, setFetchAgain }) => {
   useEffect(() => {
     setLoggedUser(JSON.parse(localStorage.getItem("userInfo")));
     fetchChats();
-    
 
     // eslint-disable-next-line
-  }, [fetchAgain,chats]);
+  }, [fetchAgain, chats]);
 
   return (
     <Box
@@ -96,9 +89,7 @@ const MyChats = ({ fetchAgain, setFetchAgain }) => {
         {chats ? (
           <Stack overflowY="scroll">
             {chats.map((chat) => {
-
               return (
-                
                 <Box
                   onClick={() => setSelectedChat(chat)}
                   cursor="pointer"
@@ -115,7 +106,7 @@ const MyChats = ({ fetchAgain, setFetchAgain }) => {
                       ? getSender(loggedUser, chat.users)
                       : chat.chatName}
                   </Text>
-  
+
                   {chat.latestMessage && (
                     <Text fontSize="xs">
                       {chat.latestMessage.sender._id !== user._id ? (
@@ -123,15 +114,18 @@ const MyChats = ({ fetchAgain, setFetchAgain }) => {
                       ) : (
                         <b>You: </b>
                       )}
-                      {chat.latestMessage.content.length > 50
-                        ? chat.latestMessage.content.substring(0, 51) + "..."
+                      {chat.latestMessage.type === "image" ||
+                      chat.latestMessage.type === "video" ||
+                      chat.latestMessage.type === "file"
+                        ? chat.latestMessage.fileName
+                        : chat.latestMessage.content.length >50 
+                        ? chat.latestMessage.content.substring(0, 50) + "..."
                         : chat.latestMessage.content}
                     </Text>
                   )}
                 </Box>
-              )
-            }
-            )}
+              );
+            })}
           </Stack>
         ) : (
           <ChatLoading />
