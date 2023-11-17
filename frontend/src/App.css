@@ -3,7 +3,7 @@
 .App{
     min-height: 100vh;
     display: flex;
-    background-image: url("C:/hoctap/frontend/213_generated.jpg");
+    background-image: url("../213_generated.jpg");
     background-size: cover;
     background-position: center;
 }

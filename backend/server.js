@@ -64,32 +64,22 @@ io.on("connection", (socket) => {
     });
   });
 
-   socket.on("offer", (offer, remoteUserId) => {
-    // Send the offer to the specific remote user
-    io.to(remoteUserId).emit("offer", offer, socket.id);
-  });
-
-  socket.on("answer", (answer, remoteSocketId) => {
-    // Send the answer to the specific remote user
-    io.to(remoteSocketId).emit("answer", answer);
-  });
-
-  socket.on("ice-candidate", (candidate, remoteSocketId) => {
-    // Send the ICE candidate to the specific remote user
-    io.to(remoteSocketId).emit("ice-candidate", candidate);
-  });
   socket.on("fetch my chat", async (room) => {
     const chat = await Chat.findById(room);
     if (!chat.users) return console.log("users not defined");
     socket.in(chat).emit("my chat update", chat);
   });
 
-  socket.on("typing", (room) => {
-    {
-      socket.to(room).emit("typing", room);
-    }
-  });
+  socket.on("typing", (room) => socket.to(room).emit("typing", room));
   socket.on("stop typing", (room) => socket.to(room).emit("stop typing"));
+
+  socket.on("offer", (offer, room, id) => {
+    room.users.forEach((user) => {
+      if (user._id !== id) {
+        socket.to(user._id).emit("receive offer", offer);
+      }
+    });
+  });
 });
 
 server.listen(5000, () => {

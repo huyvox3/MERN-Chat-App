@@ -14,7 +14,7 @@ import {
   useToast,
 } from "@chakra-ui/react";
 import axios from "axios";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import Lottie from "react-lottie";
 import io from "socket.io-client";
 import { ChatState } from "../Context/ChatProvider";
@@ -27,7 +27,16 @@ import "./style.css";
 const ENDPOINT = "http://localhost:5000";
 
 var socket, selectedChatCompare;
+const rtcServer = {
+  iceServer: [
+    {
+      urls: ["stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"],
+    },
+  ],
+  iceCandidatePoolSize: 10,
+};
 
+let pc = new RTCPeerConnection(rtcServer);
 const SingleChat = ({ fetchAgain, setFetchAgain }) => {
   const [file, setFile] = useState("");
   const [fileLink, setFileLink] = useState("");
@@ -49,9 +58,6 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
     setChats,
   } = ChatState();
   let localStream, remoteStream;
-  let peerConnection;
-  const localVideoRef = useRef(null);
-  const remoteVideoRef = useRef(null);
   let localVideo = document.getElementById("localVideo");
   let remoteVideo = document.getElementById("remoteVideo");
   const toast = useToast();
@@ -67,19 +73,14 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
     socket = io(ENDPOINT);
     socket.emit("setup", user);
     socket.on("connected", () => setSocketConnected(true));
-    socket.on("typing", (room) => {
-      // if (selectedChatCompare._id === room)
-      setIsTyping(true);
-    });
-    socket.on("stop typing", () => {
-      setIsTyping(false);
-    });
+    socket.on("typing", () => setIsTyping(true));
+    socket.on("stop typing", () => setIsTyping(false));
+    socket.on("receive offer", (offer) => console.log(offer))
   }, [user]);
 
   useEffect(() => {
     fetchMessages();
     if (!selectedChat && selectedChatCompare) {
-      console.log("okasdasd");
       socket.emit("leave chat", selectedChatCompare._id);
     }
     selectedChatCompare = selectedChat;
@@ -107,10 +108,6 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
       setChats([Chats, ...room]);
       setFetchAgain(!fetchAgain);
     });
-
-    socket.on("offer", handleOffer);
-    socket.on("answer", handleAnswer);
-    socket.on("ice-candidate", handleIceCandidate);
   });
   const handleClick = (id) => {
     document.getElementById(id).click();
@@ -173,23 +170,71 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
     }
   };
 
-  const startCall = async () => {
+  const getStreamMedia = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
+      localStream = await navigator.mediaDevices.getUserMedia({
         video: true,
         audio: true,
       });
-      localVideoRef.current.srcObject = stream;
-      localStream = stream;
+
+      remoteStream = new MediaStream();
+      localStream.getTracks().forEach((track) => {
+        pc.addTrack(track, localStream);
+      });
+      pc.ontrack = (event) => {
+        event.streams[0].getTracks().forEach((track) => {
+          remoteStream.addTrack(track);
+        });
+      };
+      localVideo.srcObject = localStream;
+      remoteVideo.srcObject = remoteStream;
       localVideo.play().catch((e) => {
         console.error("Error starting video playback:", e);
       });
-      localStream.play().catch((e) => {
+      remoteVideo.play().catch((e) => {
         console.error("Error starting video playback:", e);
       });
     } catch (error) {
       console.error("Error accessing media devices:", error);
     }
+  };
+
+  const startCall = async () => {
+    try {
+      const offerDescription = await pc.createOffer();
+      await pc.setLocalDescription(await pc.createOffer());
+
+      const offer = {
+        sdp: offerDescription.sdp,
+        type: offerDescription.type,
+      };
+      console.log(selectedChat._id);
+      socket.emit("offer", offer, selectedChat,user._id);
+    } catch (error) {
+      toast({
+        title: "Error Occured!",
+        description: "Failed to Call",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+        position: "bottom",
+      });
+    }
+  };
+  const getConnectedDevices = async (type) => {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    return devices.filter((device) => device.kind === type);
+  };
+  const updateCameraList = async (cameras) => {
+    const listElement = document.querySelector("select#availableCameras");
+    listElement.innerHTML = "";
+    cameras
+      .map((camera) => {
+        const cameraOption = document.createElement("option");
+        cameraOption.label = camera.label;
+        cameraOption.value = camera.deviceId;
+      })
+      .forEach((cameraOption) => listElement.add(cameraOption));
   };
 
   const endCall = () => {
@@ -199,51 +244,6 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
     if (remoteStream) {
       remoteStream.getTracks().forEach((track) => track.stop());
       remoteVideo.srcObject = null;
-    }
-  };
-  const handleOffer = async (offer, remoteSocketId) => {
-    try {
-      const peerConnection = new RTCPeerConnection();
-      localStream
-        .getTracks()
-        .forEach((track) => peerConnection.addTrack(track, localStream));
-
-      peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-
-      const answer = await peerConnection.createAnswer();
-      await peerConnection.setLocalDescription(answer);
-
-      socket.emit("answer", answer, remoteSocketId);
-
-      peerConnection.onicecandidate = (event) => {
-        if (event.candidate) {
-          socket.emit("ice-candidate", event.candidate, remoteSocketId);
-        }
-      };
-
-      peerConnection.ontrack = (event) => {
-        remoteVideoRef.current.srcObject = event.streams[0];
-      };
-    } catch (error) {
-      console.error("Error handling offer:", error);
-    }
-  };
-
-  const handleAnswer = async (answer) => {
-    try {
-      await peerConnection.setRemoteDescription(
-        new RTCSessionDescription(answer)
-      );
-    } catch (error) {
-      console.error("Error handling answer:", error);
-    }
-  };
-
-  const handleIceCandidate = async (candidate) => {
-    try {
-      await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-    } catch (error) {
-      console.error("Error handling ICE candidate:", error);
     }
   };
   const sendMessage = async (e) => {
@@ -644,7 +644,6 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
         <source src={m.content} type="video/mp4"></source>
       </video> */}
       <video
-        ref={localVideoRef}
         id="localVideo"
         playsInline
         autoPlay
@@ -652,7 +651,6 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
         // style={{ display: "none" }}
       ></video>
       <video
-        ref={remoteVideoRef}
         id="remoteVideo"
         playsInline
         autoPlay
