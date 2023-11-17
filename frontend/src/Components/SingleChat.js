@@ -14,7 +14,7 @@ import {
   useToast,
 } from "@chakra-ui/react";
 import axios from "axios";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Lottie from "react-lottie";
 import io from "socket.io-client";
 import { ChatState } from "../Context/ChatProvider";
@@ -48,7 +48,12 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
     Chats,
     setChats,
   } = ChatState();
-
+  let localStream, remoteStream;
+  let peerConnection;
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
+  let localVideo = document.getElementById("localVideo");
+  let remoteVideo = document.getElementById("remoteVideo");
   const toast = useToast();
   const defaultOptions = {
     loop: true,
@@ -102,6 +107,10 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
       setChats([Chats, ...room]);
       setFetchAgain(!fetchAgain);
     });
+
+    socket.on("offer", handleOffer);
+    socket.on("answer", handleAnswer);
+    socket.on("ice-candidate", handleIceCandidate);
   });
   const handleClick = (id) => {
     document.getElementById(id).click();
@@ -164,13 +173,79 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
     }
   };
 
-  const getConnectedDevices = async (type) => {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-
-    const videoCameras = devices.filter((device) => device.kind === type);
-    console.log("Cameras found:", videoCameras);
+  const startCall = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true,
+      });
+      localVideoRef.current.srcObject = stream;
+      localStream = stream;
+      localVideo.play().catch((e) => {
+        console.error("Error starting video playback:", e);
+      });
+      localStream.play().catch((e) => {
+        console.error("Error starting video playback:", e);
+      });
+    } catch (error) {
+      console.error("Error accessing media devices:", error);
+    }
   };
 
+  const endCall = () => {
+    // Your cleanup logic goes here (closing peer connections, stopping streams, etc.)
+    localStream.getTracks().forEach((track) => track.stop());
+    localVideo.srcObject = null;
+    if (remoteStream) {
+      remoteStream.getTracks().forEach((track) => track.stop());
+      remoteVideo.srcObject = null;
+    }
+  };
+  const handleOffer = async (offer, remoteSocketId) => {
+    try {
+      const peerConnection = new RTCPeerConnection();
+      localStream
+        .getTracks()
+        .forEach((track) => peerConnection.addTrack(track, localStream));
+
+      peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+
+      socket.emit("answer", answer, remoteSocketId);
+
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.emit("ice-candidate", event.candidate, remoteSocketId);
+        }
+      };
+
+      peerConnection.ontrack = (event) => {
+        remoteVideoRef.current.srcObject = event.streams[0];
+      };
+    } catch (error) {
+      console.error("Error handling offer:", error);
+    }
+  };
+
+  const handleAnswer = async (answer) => {
+    try {
+      await peerConnection.setRemoteDescription(
+        new RTCSessionDescription(answer)
+      );
+    } catch (error) {
+      console.error("Error handling answer:", error);
+    }
+  };
+
+  const handleIceCandidate = async (candidate) => {
+    try {
+      await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (error) {
+      console.error("Error handling ICE candidate:", error);
+    }
+  };
   const sendMessage = async (e) => {
     if (e.key === "Enter" && (newMessage || fileLink)) {
       socket.emit("stop typing", selectedChat._id);
@@ -377,6 +452,7 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
     setIsUpload(false);
     return imageURL;
   };
+
   return (
     <>
       {selectedChat ? (
@@ -419,12 +495,17 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
             <IconButton
               icon={<ArrowDownIcon></ArrowDownIcon>}
               onClick={() => {
-                getConnectedDevices("videoinput");
+                startCall();
               }}
               color={"black"}
-            >
-              asdfasdfas
-            </IconButton>
+            ></IconButton>
+            <IconButton
+              icon={<ArrowBackIcon></ArrowBackIcon>}
+              onClick={() => {
+                endCall();
+              }}
+              color={"black"}
+            ></IconButton>
           </Text>
           <Box
             display="flex"
@@ -546,6 +627,37 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
           </Text>
         </Box>
       )}
+
+      {/* {/* <video
+        controls
+        style={{
+          backgroundColor: `${
+            m.sender._id === user._id ? "#BEE3F8" : "#B9F5D0"
+          }`,
+          marginLeft: isSameSenderMargin(messages, m, i, user._id),
+          marginTop: isSameUser(messages, m, i, user._id) ? 3 : 10,
+          borderRadius: "20px",
+          maxWidth: "18em",
+          maxHeight: "18em",
+        }}
+      >
+        <source src={m.content} type="video/mp4"></source>
+      </video> */}
+      <video
+        ref={localVideoRef}
+        id="localVideo"
+        playsInline
+        autoPlay
+        muted
+        // style={{ display: "none" }}
+      ></video>
+      <video
+        ref={remoteVideoRef}
+        id="remoteVideo"
+        playsInline
+        autoPlay
+        // style={{ display: "none" }}
+      ></video>
     </>
   );
 };
