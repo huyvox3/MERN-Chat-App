@@ -27,16 +27,17 @@ import "./style.css";
 const ENDPOINT = "http://localhost:5000";
 
 var socket, selectedChatCompare;
-const rtcServer = {
-  iceServer: [
+const rtcConfig = {
+  iceServers: [
     {
       urls: ["stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"],
     },
   ],
-  iceCandidatePoolSize: 10,
 };
 
-let pc = new RTCPeerConnection(rtcServer);
+let pc;
+let localStream;
+let pcs = [];
 const SingleChat = ({ fetchAgain, setFetchAgain }) => {
   const [file, setFile] = useState("");
   const [fileLink, setFileLink] = useState("");
@@ -48,6 +49,7 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
   const [socketConnected, setSocketConnected] = useState(false);
   const [typing, setTyping] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+
   const {
     user,
     selectedChat,
@@ -57,9 +59,7 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
     Chats,
     setChats,
   } = ChatState();
-  let localStream, remoteStream;
-  let localVideo = document.getElementById("localVideo");
-  let remoteVideo = document.getElementById("remoteVideo");
+
   const toast = useToast();
   const defaultOptions = {
     loop: true,
@@ -75,13 +75,31 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
     socket.on("connected", () => setSocketConnected(true));
     socket.on("typing", () => setIsTyping(true));
     socket.on("stop typing", () => setIsTyping(false));
-    socket.on("receive offer", (offer) => console.log(offer))
+
+    socket.on("receive offer", async (offer, room) => {
+      await setSelectedChat(room);
+      handleReceivedOffer(offer, room);
+    });
+    socket.on("receive ice-candidate", (ice, room) => {
+      // setSelectedChat(room)
+      if (selectedChat !== room) {
+        setSelectedChat(room);
+      }
+      if (pc) addReceivedIceCandidate(ice, room);
+    });
+    socket.on("receive answer", (answer, room) => {
+      handleReceivedAnswer(answer);
+    });
+    socket.on("update room users", (room, roomId) =>
+      socket.emit("update room users", room, roomId)
+    );
+    socket.on("end video call", () => endVideoCall());
   }, [user]);
 
   useEffect(() => {
     fetchMessages();
     if (!selectedChat && selectedChatCompare) {
-      socket.emit("leave chat", selectedChatCompare._id);
+      socket.emit("leave chat", selectedChatCompare._id, user._id);
     }
     selectedChatCompare = selectedChat;
 
@@ -157,7 +175,7 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
       setMessage(data);
 
       setLoading(false);
-      socket.emit("join chat", selectedChat._id);
+      socket.emit("join chat", selectedChat._id, user._id);
     } catch (error) {
       toast({
         title: "Error Occured!",
@@ -170,50 +188,92 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
     }
   };
 
-  const getStreamMedia = async () => {
+  const getLocalStreamMedia = async () => {
     try {
       localStream = await navigator.mediaDevices.getUserMedia({
         video: true,
         audio: true,
       });
+      console.log(localStream);
+      const localVideo = document.getElementById("localVideo");
+      if (localVideo && localStream) {
+        localVideo.srcObject = localStream;
+      }
 
-      remoteStream = new MediaStream();
-      localStream.getTracks().forEach((track) => {
-        pc.addTrack(track, localStream);
-      });
-      pc.ontrack = (event) => {
-        event.streams[0].getTracks().forEach((track) => {
-          remoteStream.addTrack(track);
+      ["remoteVideo", "localVideo"].forEach((videoId) => {
+        const video = document.getElementById(videoId);
+
+        video.addEventListener("loadedmetadata", () => {
+          video.addEventListener("click", () => togglePictureInPicture(video));
         });
-      };
-      localVideo.srcObject = localStream;
-      remoteVideo.srcObject = remoteStream;
-      localVideo.play().catch((e) => {
-        console.error("Error starting video playback:", e);
-      });
-      remoteVideo.play().catch((e) => {
-        console.error("Error starting video playback:", e);
       });
     } catch (error) {
       console.error("Error accessing media devices:", error);
     }
   };
 
-  const startCall = async () => {
+  const startScreenSharing = async () => {
     try {
-      const offerDescription = await pc.createOffer();
-      await pc.setLocalDescription(await pc.createOffer());
+      localStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: true,
+      });
+      console.log(localStream);
+      const localVideo = document.getElementById("localVideo");
+      if (localVideo && localStream) {
+        localVideo.srcObject = localStream;
+      }
 
+      ["remoteVideo", "localVideo"].forEach((videoId) => {
+        const video = document.getElementById(videoId);
+
+        video.addEventListener("loadedmetadata", () => {
+          video.addEventListener("click", () => togglePictureInPicture(video));
+        });
+      });
+    } catch (error) {
+      console.error("Error accessing media devices:", error);
+    }
+  };
+  const startCall = async () => {
+    await startScreenSharing();
+    try {
+      pc = new RTCPeerConnection(rtcConfig);
+
+      pc.onicecandidate = (e) => {
+        if (e.candidate) {
+          const iceCandidate = {
+            candidate: e.candidate.candidate,
+            sdpMLineIndex: e.candidate.sdpMLineIndex,
+            sdpMid: e.candidate.sdpMid,
+          };
+          // console.log(selectedChat._id, user._id);
+          socket.emit("ice", iceCandidate, selectedChat, user._id);
+        }
+      };
+
+      pc.ontrack = async (e) => {
+        const remoteVideo = document.getElementById("remoteVideo");
+        remoteVideo.srcObject = e.streams[0];
+      };
+      localStream.getTracks().forEach(async (track) => {
+        try {
+          await pc.addTrack(track, localStream);
+        } catch (error) {
+          console.log(error);
+        }
+      });
+      const offerDescription = await pc.createOffer();
+      await pc.setLocalDescription(offerDescription);
       const offer = {
         sdp: offerDescription.sdp,
         type: offerDescription.type,
       };
-      console.log(selectedChat._id);
-      socket.emit("offer", offer, selectedChat,user._id);
+      socket.emit("offer", offer, selectedChat, user._id);
+      console.log("send offer");
     } catch (error) {
       toast({
-        title: "Error Occured!",
-        description: "Failed to Call",
+        title: "Call error!",
         status: "error",
         duration: 5000,
         isClosable: true,
@@ -221,31 +281,87 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
       });
     }
   };
-  const getConnectedDevices = async (type) => {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    return devices.filter((device) => device.kind === type);
-  };
-  const updateCameraList = async (cameras) => {
-    const listElement = document.querySelector("select#availableCameras");
-    listElement.innerHTML = "";
-    cameras
-      .map((camera) => {
-        const cameraOption = document.createElement("option");
-        cameraOption.label = camera.label;
-        cameraOption.value = camera.deviceId;
+
+  const handleReceivedOffer = async (receivedOffer, room) => {
+    await getLocalStreamMedia();
+
+    pc = new RTCPeerConnection(rtcConfig);
+
+    pc.onicecandidate = async (e) => {
+      if (e.candidate) {
+        const iceCandidate = {
+          candidate: e.candidate.candidate,
+          sdpMLineIndex: e.candidate.sdpMLineIndex,
+          sdpMid: e.candidate.sdpMid,
+        };
+
+        socket.emit("ice", iceCandidate, selectedChatCompare, user._id);
+      }
+    };
+
+    pc.ontrack = (e) => {
+      const remoteVideo = document.getElementById("remoteVideo");
+      remoteVideo.srcObject = e.streams[0];
+    };
+    localStream.getTracks().forEach((track) => {
+      pc.addTrack(track, localStream);
+    });
+    console.log("receive offer");
+    await pc
+      .setRemoteDescription(receivedOffer)
+      .then(() => {
+        console.log("receive offer and setted remote");
       })
-      .forEach((cameraOption) => listElement.add(cameraOption));
+      .then(async () => {
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+      }) // Set the local description with the answer
+      .then(async () => {
+        console.log(pc);
+        const answerToSend = await {
+          sdp: pc.localDescription.sdp,
+          type: pc.localDescription.type,
+        };
+
+        socket.emit("answer", answerToSend, room, user._id);
+      })
+      .catch((error) => {
+        console.error("Error handling received offer:", error);
+      });
   };
 
-  const endCall = () => {
-    // Your cleanup logic goes here (closing peer connections, stopping streams, etc.)
-    localStream.getTracks().forEach((track) => track.stop());
-    localVideo.srcObject = null;
-    if (remoteStream) {
-      remoteStream.getTracks().forEach((track) => track.stop());
-      remoteVideo.srcObject = null;
-    }
+  const handleReceivedAnswer = async (receivedAnswer) => {
+    console.log("receive answer");
+
+    // Set the received answer as the remote description
+    await pc
+      .setRemoteDescription(receivedAnswer)
+      .then(() => {
+        console.log(pc);
+      })
+      .catch((error) => {
+        console.error("Error setting remote description:", error);
+      });
   };
+  const addReceivedIceCandidate = async (receivedIceCandidate) => {
+    const candidate = new RTCIceCandidate({
+      candidate: receivedIceCandidate.candidate,
+      sdpMLineIndex: receivedIceCandidate.sdpMLineIndex,
+      sdpMid: receivedIceCandidate.sdpMid,
+    });
+
+    // Add the received ICE candidate to the peer connection
+    await pc
+      .addIceCandidate(candidate)
+      .then(() => {
+        console.log(pc);
+        console.log("ICE candidate added successfully");
+      })
+      .catch((error) => {
+        console.error("Error adding ICE candidate:", error);
+      });
+  };
+
   const sendMessage = async (e) => {
     if (e.key === "Enter" && (newMessage || fileLink)) {
       socket.emit("stop typing", selectedChat._id);
@@ -453,6 +569,66 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
     return imageURL;
   };
 
+  const togglePictureInPicture = (video) => {
+    if (document.pictureInPictureElement) {
+      document
+        .exitPictureInPicture()
+        .then(() => console.log("Exited Picture-in-Picture mode"))
+        .catch((error) =>
+          console.error("Error exiting Picture-in-Picture mode:", error)
+        );
+    } else {
+      video
+        .requestPictureInPicture()
+        .then(() => console.log("Entered Picture-in-Picture mode"))
+        .catch((error) =>
+          console.error("Error entering Picture-in-Picture mode:", error)
+        );
+    }
+  };
+
+  const endVideoCall = () => {
+    // Close the RTCPeerConnection
+    if (pc) {
+      pc.close();
+      pc = null;
+    }
+
+    // Stop local media tracks
+    if (localStream) {
+      localStream.getTracks().forEach((track) => track.stop());
+      localStream = null;
+    }
+    const localVideo = document.getElementById("localVideo");
+    const remoteVideo = document.getElementById("remoteVideo");
+    localVideo.style.display = "none";
+    remoteVideo.style.display = "none";
+    // Remove remote stream from the video element
+    if (remoteVideo) {
+      remoteVideo.srcObject = null;
+    }
+  };
+
+  const startGroupVideoCall = () => {
+    if (selectedChat.isGroupChat) {
+    
+      // socket.emit("join group chat", selectedChat._id);
+
+    } else {
+      toast({
+        title: "Error!",
+        status: "warning",
+        duration: 500,
+        isClosable: true,
+        position: "bottom",
+      });
+    }
+  };
+
+
+  // const getRoomUsers = async() =>{
+    
+  // }
   return (
     <>
       {selectedChat ? (
@@ -502,7 +678,15 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
             <IconButton
               icon={<ArrowBackIcon></ArrowBackIcon>}
               onClick={() => {
-                endCall();
+                socket.emit("end video call", selectedChat, user._id);
+                endVideoCall();
+              }}
+              color={"black"}
+            ></IconButton>
+            <IconButton
+              icon={<ArrowBackIcon></ArrowBackIcon>}
+              onClick={() => {
+                startScreenSharing();
               }}
               color={"black"}
             ></IconButton>
@@ -627,35 +811,23 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
           </Text>
         </Box>
       )}
-
-      {/* {/* <video
-        controls
-        style={{
-          backgroundColor: `${
-            m.sender._id === user._id ? "#BEE3F8" : "#B9F5D0"
-          }`,
-          marginLeft: isSameSenderMargin(messages, m, i, user._id),
-          marginTop: isSameUser(messages, m, i, user._id) ? 3 : 10,
-          borderRadius: "20px",
-          maxWidth: "18em",
-          maxHeight: "18em",
-        }}
-      >
-        <source src={m.content} type="video/mp4"></source>
-      </video> */}
-      <video
-        id="localVideo"
-        playsInline
-        autoPlay
-        muted
-        // style={{ display: "none" }}
-      ></video>
-      <video
-        id="remoteVideo"
-        playsInline
-        autoPlay
-        // style={{ display: "none" }}
-      ></video>
+      <Box className="video-container">
+        <video
+          id="localVideo"
+          className="video"
+          playsInline
+          autoPlay
+          muted
+          // style={{ display: "none" }}
+        ></video>
+        <video
+          id="remoteVideo"
+          className="video"
+          playsInline
+          autoPlay
+          // style={{ display: "none" }}
+        ></video>
+      </Box>
     </>
   );
 };

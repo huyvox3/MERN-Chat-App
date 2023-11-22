@@ -17,3 +17,11 @@
   height: 18px;
   justify-content: center;
 }
+.video-container {
+  display: flex;
+  justify-content: space-between;
+}
+.video {
+  width: 48%; /* Adjust as needed */
+  margin-bottom: 10px;
+}

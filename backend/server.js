@@ -25,6 +25,7 @@ app.use("/messages", MessageRoutes);
 app.use(errorHandler);
 app.use(notFound);
 
+const rooms = {};
 // const server =app.listen(
 //   5000,
 //   console.log(`Server started on PORT ${PORT}`.cyan.bold.underline)
@@ -36,7 +37,6 @@ const io = require("socket.io")(server, {
     // credentials: true,
     methods: ["GET", "POST"],
     credential: true,
-    rejectUnauthorized: false,
   },
 });
 io.on("connection", (socket) => {
@@ -46,14 +46,30 @@ io.on("connection", (socket) => {
 
     socket.emit("connected");
   });
-  socket.on("join chat", (room) => {
-    socket.join(room);
-    console.log("User joined Room: " + room);
+  socket.on("join chat", (roomId, userId) => {
+    socket.join(roomId);
+    if (!rooms[roomId]) rooms[roomId] = { users: [] };
+    rooms[roomId].users.push({ userId });
+ 
+    rooms[roomId].users.forEach((user) => {
+      socket.in(user.userId).emit("update room users", rooms[roomId].users, roomId);
+    });
+    console.log("User joined Room: " + roomId);
   });
 
-  socket.on("leave chat", (room) => {
-    socket.leave(room);
-    console.log("User left Room: " + room);
+  socket.on("update room users", (room, roomId) => {
+    rooms[roomId].users = room;
+    console.log("update room", rooms[roomId]);
+  });
+  socket.on("leave chat", (roomId, userId) => {
+    socket.leave(roomId);
+    rooms[roomId].users = rooms[roomId].users.filter((user) => user.userId !== userId);
+    console.log(rooms[roomId].users);
+    rooms[roomId].users.forEach(user => {
+      socket.in(user.userId).emit('update room users', rooms[roomId].users,roomId)
+    });
+  
+    console.log("User left Room: " + roomId);
   });
   socket.on("new message", (newMessageReceived) => {
     var chat = newMessageReceived.chat;
@@ -76,7 +92,28 @@ io.on("connection", (socket) => {
   socket.on("offer", (offer, room, id) => {
     room.users.forEach((user) => {
       if (user._id !== id) {
-        socket.to(user._id).emit("receive offer", offer);
+        socket.to(user._id).emit("receive offer", offer, room);
+      }
+    });
+  });
+  socket.on("ice", (ice, room, id) => {
+    // console.log(room);
+    room.users.forEach((user) => {
+      if (user._id !== id)
+        socket.to(user._id).emit("receive ice-candidate", ice);
+    });
+  });
+  socket.on("answer", (answer, room, id) => {
+    room.users.forEach((user) => {
+      if (user._id !== id) {
+        socket.to(user._id).emit("receive answer", answer);
+      }
+    });
+  });
+  socket.on("end video call", (room, id) => {
+    room.users.forEach((user) => {
+      if (user._id !== id) {
+        socket.to(user._id).emit("end video call");
       }
     });
   });
