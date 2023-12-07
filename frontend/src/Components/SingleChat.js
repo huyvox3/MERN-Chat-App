@@ -1,8 +1,4 @@
-import {
-  ArrowBackIcon,
-  ArrowDownIcon,
-  ChevronRightIcon,
-} from "@chakra-ui/icons";
+import { ArrowBackIcon, ChevronRightIcon, PhoneIcon } from "@chakra-ui/icons";
 import {
   Box,
   Button,
@@ -15,11 +11,13 @@ import {
 } from "@chakra-ui/react";
 import axios from "axios";
 import React, { useEffect, useState } from "react";
+import ReactDOM from "react-dom";
 import Lottie from "react-lottie";
 import io from "socket.io-client";
 import { ChatState } from "../Context/ChatProvider";
 import animationData from "../animations/typingAnimation.json";
 import ScrollableChat from "./ScrollableChat";
+import VideoCall from "./VideoCall";
 import { getSender, getSenderFull } from "./config/ChatLogic";
 import ProfileModal from "./miscellaneous/ProfileModal";
 import UpdateGroupChatModal from "./miscellaneous/UpdateGroupChatModal";
@@ -35,9 +33,6 @@ const rtcConfig = {
   ],
 };
 
-let pc;
-let localStream;
-let pcs = [];
 const SingleChat = ({ fetchAgain, setFetchAgain }) => {
   const [file, setFile] = useState("");
   const [fileLink, setFileLink] = useState("");
@@ -73,41 +68,20 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
     socket = io(ENDPOINT);
     socket.emit("setup", user);
     socket.on("connected", () => setSocketConnected(true));
-    socket.on("typing", () => setIsTyping(true));
-    socket.on("stop typing", () => setIsTyping(false));
-
-    socket.on("receive offer", async (offer, room) => {
-      await setSelectedChat(room);
-      handleReceivedOffer(offer, room);
-    });
-    socket.on("receive ice-candidate", (ice, room) => {
-      // setSelectedChat(room)
-      if (selectedChat !== room) {
-        setSelectedChat(room);
-      }
-      if (pc) addReceivedIceCandidate(ice, room);
-    });
-    socket.on("receive answer", (answer, room) => {
-      handleReceivedAnswer(answer);
-    });
-    socket.on("update room users", (room, roomId) =>
-      socket.emit("update room users", room, roomId)
-    );
-    socket.on("end video call", () => endVideoCall());
   }, [user]);
 
   useEffect(() => {
     fetchMessages();
-    if (!selectedChat && selectedChatCompare) {
+    if (!selectedChat && selectedChatCompare)
       socket.emit("leave chat", selectedChatCompare._id, user._id);
-    }
-    selectedChatCompare = selectedChat;
 
-    // if(selectedChat)
-    // console.log(selectedChat._id);
+    selectedChatCompare = selectedChat;
   }, [selectedChat]);
 
   useEffect(() => {
+    socket.on("typing", () => setIsTyping(true));
+    socket.on("stop typing", () => setIsTyping(false));
+
     socket.on("message received", (newMessageReceived) => {
       if (
         !selectedChatCompare ||
@@ -121,25 +95,27 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
         setMessage([...messages, newMessageReceived]);
       }
     });
-
     socket.on("my chat update", async (room) => {
       setChats([Chats, ...room]);
       setFetchAgain(!fetchAgain);
     });
   });
+
   const handleClick = (id) => {
     document.getElementById(id).click();
   };
 
   const typingHandler = (e) => {
+    console.log(e.target.value);
+    console.log(typing);
     if (e.key === "Backspace" || e.target.value === "") {
       socket.emit("stop typing");
       setTyping(false);
-      // setIsTyping(false);
     }
 
     setNewMessage(e.target.value);
     if (!socketConnected) return;
+
     if (!typing) {
       setTyping(true);
       socket.emit("typing", selectedChat._id);
@@ -162,7 +138,6 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
 
   const fetchMessages = async () => {
     if (!selectedChat) return;
-
     try {
       const config = {
         headers: {
@@ -188,182 +163,9 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
     }
   };
 
-  const getLocalStreamMedia = async () => {
-    try {
-      localStream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true,
-      });
-      console.log(localStream);
-      const localVideo = document.getElementById("localVideo");
-      if (localVideo && localStream) {
-        localVideo.srcObject = localStream;
-      }
-
-      ["remoteVideo", "localVideo"].forEach((videoId) => {
-        const video = document.getElementById(videoId);
-
-        video.addEventListener("loadedmetadata", () => {
-          video.addEventListener("click", () => togglePictureInPicture(video));
-        });
-      });
-    } catch (error) {
-      console.error("Error accessing media devices:", error);
-    }
-  };
-
-  const startScreenSharing = async () => {
-    try {
-      localStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: true,
-      });
-      console.log(localStream);
-      const localVideo = document.getElementById("localVideo");
-      if (localVideo && localStream) {
-        localVideo.srcObject = localStream;
-      }
-
-      ["remoteVideo", "localVideo"].forEach((videoId) => {
-        const video = document.getElementById(videoId);
-
-        video.addEventListener("loadedmetadata", () => {
-          video.addEventListener("click", () => togglePictureInPicture(video));
-        });
-      });
-    } catch (error) {
-      console.error("Error accessing media devices:", error);
-    }
-  };
-  const startCall = async () => {
-    await startScreenSharing();
-    try {
-      pc = new RTCPeerConnection(rtcConfig);
-
-      pc.onicecandidate = (e) => {
-        if (e.candidate) {
-          const iceCandidate = {
-            candidate: e.candidate.candidate,
-            sdpMLineIndex: e.candidate.sdpMLineIndex,
-            sdpMid: e.candidate.sdpMid,
-          };
-          // console.log(selectedChat._id, user._id);
-          socket.emit("ice", iceCandidate, selectedChat, user._id);
-        }
-      };
-
-      pc.ontrack = async (e) => {
-        const remoteVideo = document.getElementById("remoteVideo");
-        remoteVideo.srcObject = e.streams[0];
-      };
-      localStream.getTracks().forEach(async (track) => {
-        try {
-          await pc.addTrack(track, localStream);
-        } catch (error) {
-          console.log(error);
-        }
-      });
-      const offerDescription = await pc.createOffer();
-      await pc.setLocalDescription(offerDescription);
-      const offer = {
-        sdp: offerDescription.sdp,
-        type: offerDescription.type,
-      };
-      socket.emit("offer", offer, selectedChat, user._id);
-      console.log("send offer");
-    } catch (error) {
-      toast({
-        title: "Call error!",
-        status: "error",
-        duration: 5000,
-        isClosable: true,
-        position: "bottom",
-      });
-    }
-  };
-
-  const handleReceivedOffer = async (receivedOffer, room) => {
-    await getLocalStreamMedia();
-
-    pc = new RTCPeerConnection(rtcConfig);
-
-    pc.onicecandidate = async (e) => {
-      if (e.candidate) {
-        const iceCandidate = {
-          candidate: e.candidate.candidate,
-          sdpMLineIndex: e.candidate.sdpMLineIndex,
-          sdpMid: e.candidate.sdpMid,
-        };
-
-        socket.emit("ice", iceCandidate, selectedChatCompare, user._id);
-      }
-    };
-
-    pc.ontrack = (e) => {
-      const remoteVideo = document.getElementById("remoteVideo");
-      remoteVideo.srcObject = e.streams[0];
-    };
-    localStream.getTracks().forEach((track) => {
-      pc.addTrack(track, localStream);
-    });
-    console.log("receive offer");
-    await pc
-      .setRemoteDescription(receivedOffer)
-      .then(() => {
-        console.log("receive offer and setted remote");
-      })
-      .then(async () => {
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-      }) // Set the local description with the answer
-      .then(async () => {
-        console.log(pc);
-        const answerToSend = await {
-          sdp: pc.localDescription.sdp,
-          type: pc.localDescription.type,
-        };
-
-        socket.emit("answer", answerToSend, room, user._id);
-      })
-      .catch((error) => {
-        console.error("Error handling received offer:", error);
-      });
-  };
-
-  const handleReceivedAnswer = async (receivedAnswer) => {
-    console.log("receive answer");
-
-    // Set the received answer as the remote description
-    await pc
-      .setRemoteDescription(receivedAnswer)
-      .then(() => {
-        console.log(pc);
-      })
-      .catch((error) => {
-        console.error("Error setting remote description:", error);
-      });
-  };
-  const addReceivedIceCandidate = async (receivedIceCandidate) => {
-    const candidate = new RTCIceCandidate({
-      candidate: receivedIceCandidate.candidate,
-      sdpMLineIndex: receivedIceCandidate.sdpMLineIndex,
-      sdpMid: receivedIceCandidate.sdpMid,
-    });
-
-    // Add the received ICE candidate to the peer connection
-    await pc
-      .addIceCandidate(candidate)
-      .then(() => {
-        console.log(pc);
-        console.log("ICE candidate added successfully");
-      })
-      .catch((error) => {
-        console.error("Error adding ICE candidate:", error);
-      });
-  };
-
   const sendMessage = async (e) => {
     if (e.key === "Enter" && (newMessage || fileLink)) {
+      console.log(selectedChat._id);
       socket.emit("stop typing", selectedChat._id);
       socket.emit("fetch my chat", selectedChat._id);
 
@@ -569,66 +371,20 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
     return imageURL;
   };
 
-  const togglePictureInPicture = (video) => {
-    if (document.pictureInPictureElement) {
-      document
-        .exitPictureInPicture()
-        .then(() => console.log("Exited Picture-in-Picture mode"))
-        .catch((error) =>
-          console.error("Error exiting Picture-in-Picture mode:", error)
-        );
-    } else {
-      video
-        .requestPictureInPicture()
-        .then(() => console.log("Entered Picture-in-Picture mode"))
-        .catch((error) =>
-          console.error("Error entering Picture-in-Picture mode:", error)
-        );
-    }
+  const openNewWindow = (selectedChat, user) => {
+    let videoCallUrl = `videocall/${selectedChat._id}/${user._id}/true/${user.name}`;
+    if (!selectedChat.isGroupChat)
+      videoCallUrl = `videocall/${selectedChat._id}/${user._id}/false/${user.name}`;
+    const container = document.createElement("div");
+    ReactDOM.createPortal(<VideoCall></VideoCall>, container);
+    const newWindow = window.open(
+      videoCallUrl,
+      "",
+      "width=800,height=800,left=200,top=200"
+    );
+    newWindow.document.body.appendChild(container);
   };
 
-  const endVideoCall = () => {
-    // Close the RTCPeerConnection
-    if (pc) {
-      pc.close();
-      pc = null;
-    }
-
-    // Stop local media tracks
-    if (localStream) {
-      localStream.getTracks().forEach((track) => track.stop());
-      localStream = null;
-    }
-    const localVideo = document.getElementById("localVideo");
-    const remoteVideo = document.getElementById("remoteVideo");
-    localVideo.style.display = "none";
-    remoteVideo.style.display = "none";
-    // Remove remote stream from the video element
-    if (remoteVideo) {
-      remoteVideo.srcObject = null;
-    }
-  };
-
-  const startGroupVideoCall = () => {
-    if (selectedChat.isGroupChat) {
-    
-      // socket.emit("join group chat", selectedChat._id);
-
-    } else {
-      toast({
-        title: "Error!",
-        status: "warning",
-        duration: 500,
-        isClosable: true,
-        position: "bottom",
-      });
-    }
-  };
-
-
-  // const getRoomUsers = async() =>{
-    
-  // }
   return (
     <>
       {selectedChat ? (
@@ -668,25 +424,11 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
                 ></UpdateGroupChatModal>
               </>
             )}
+
             <IconButton
-              icon={<ArrowDownIcon></ArrowDownIcon>}
+              icon={<PhoneIcon></PhoneIcon>}
               onClick={() => {
-                startCall();
-              }}
-              color={"black"}
-            ></IconButton>
-            <IconButton
-              icon={<ArrowBackIcon></ArrowBackIcon>}
-              onClick={() => {
-                socket.emit("end video call", selectedChat, user._id);
-                endVideoCall();
-              }}
-              color={"black"}
-            ></IconButton>
-            <IconButton
-              icon={<ArrowBackIcon></ArrowBackIcon>}
-              onClick={() => {
-                startScreenSharing();
+                openNewWindow(selectedChat, user);
               }}
               color={"black"}
             ></IconButton>
@@ -811,23 +553,6 @@ const SingleChat = ({ fetchAgain, setFetchAgain }) => {
           </Text>
         </Box>
       )}
-      <Box className="video-container">
-        <video
-          id="localVideo"
-          className="video"
-          playsInline
-          autoPlay
-          muted
-          // style={{ display: "none" }}
-        ></video>
-        <video
-          id="remoteVideo"
-          className="video"
-          playsInline
-          autoPlay
-          // style={{ display: "none" }}
-        ></video>
-      </Box>
     </>
   );
 };
