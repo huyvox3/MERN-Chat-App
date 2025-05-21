@@ -1,6 +1,6 @@
 # 💬 MERN Chat App
 
-A real-time chat application built with the MERN stack (MongoDB, Express.js, React.js, Node.js) and Socket.io for live messaging. This project supports authentication, group and private messaging, and a responsive UI.
+A real-time chat application built with the MERN stack (MongoDB, Express.js, React.js, Node.js) and Socket.io for live messaging. This project supports authentication, group and private messaging, and a responsive UI..
 
 ---
 
